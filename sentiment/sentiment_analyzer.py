@@ -2,6 +2,7 @@ import re
 import pandas as pd
 
 from brand_config import brand_config
+from sentiment.cleaning import clean_dataframe
 
 
 
@@ -11,184 +12,154 @@ from brand_config import brand_config
 # Sentiment vocabulary
 # -----------------------------
 
-positive_words = set(
-    brand_config["positive_words"]
+# word -> weight (+1/-1 normal, +2/-2 strong). Strong lists win on overlap.
+WORD_WEIGHTS = {}
+for _word in brand_config["positive_words"]:
+    WORD_WEIGHTS[_word] = 1
+for _word in brand_config["negative_words"]:
+    WORD_WEIGHTS[_word] = -1
+for _word in brand_config["strong_positive_words"]:
+    WORD_WEIGHTS[_word] = 2
+for _word in brand_config["strong_negative_words"]:
+    WORD_WEIGHTS[_word] = -2
+
+# phrase -> weight (+2/-2). Longest phrases are tried first.
+PHRASE_WEIGHTS = {phrase: 2 for phrase in brand_config["positive_phrases"]}
+PHRASE_WEIGHTS.update({phrase: -2 for phrase in brand_config["negative_phrases"]})
+PHRASE_RE = re.compile(
+    r"(?<![a-z0-9])(?:"
+    + "|".join(re.escape(p) for p in sorted(PHRASE_WEIGHTS, key=len, reverse=True))
+    + r")(?![a-z0-9])"
 )
 
-negative_words = set(
-    brand_config["negative_words"]
-)
+NEGATION_WORDS = set(brand_config["negation_words"])
+INTENSIFIERS = set(brand_config["intensifiers"])
+
+NEGATION_WINDOW = 3     # a negation within 3 words before flips a word
+INTENSIFIER_WINDOW = 2  # an intensifier within 2 words before doubles it
 
 # -----------------------------
 # Brand Relevance Check
 # -----------------------------
 
-def is_brand_relevant(text):
+def is_brand_relevant(text, source=None):
     """
-    Check whether a piece of text is relevant
-    to the selected brand.
+    Check whether a mention is relevant to the selected brand.
+
+    A mention is relevant when it names a brand keyword, OR when it comes
+    from a brand-specific source (e.g. the brand's own Google Play page),
+    where every review is about the brand even if the name is not repeated.
     """
+
+    if source in brand_config.get("brand_specific_sources", []):
+        return True
 
     text = str(text).lower()
 
-    brand_keywords = brand_config["brand_keywords"]
-
-    for keyword in brand_keywords:
+    for keyword in brand_config["brand_keywords"]:
         if keyword.lower() in text:
             return True
 
     return False
 
 
+def normalise(text):
+    """Lowercase; drop apostrophes ("can't" -> "cant"); keep letters/digits."""
+    text = str(text).lower().replace("'", "").replace("’", "")
+    text = re.sub(r"[^a-z0-9\s]", " ", text)
+    return re.sub(r"\s+", " ", text).strip()
+
+
 def analyze_sentiment(text):
     """
-    Analyze text using a rule-based sentiment approach
-    with negation and intensifier handling.
+    Rule-based sentiment of one review. Returns (label, score).
+
+    1. Multi-word phrases ("not working", "no wahala") are scored first
+       at +/-2 and removed, so their words are not counted again.
+    2. Each remaining word found in the vocabulary scores its weight
+       (+/-1, or +/-2 for strong words).
+    3. A negation word ("not", "cant", "never"...) in the 3 words before
+       flips the sign; an intensifier ("very", "so"...) in the 2 words
+       before doubles the strength.
+    4. A positive total is Positive, a negative total is Negative and
+       zero is Neutral.
     """
 
-    # Convert text to lowercase
-    text = str(text).lower()
+    text = normalise(text)
+    score = 0
 
-    # Extract words
-    words = re.findall(r"\b\w+\b", text)
+    # Step 1: phrases
+    def take_phrase(match):
+        nonlocal score
+        score += PHRASE_WEIGHTS[match.group(0)]
+        return " _ "
 
-    # Negation words
-    negation_words = {
-        "not",
-        "no",
-        "never",
-        "neither",
-        "hardly"
-    }
+    text = PHRASE_RE.sub(take_phrase, text)
 
-    # Intensifier words
-    intensifiers = {
-        "very",
-        "extremely",
-        "really",
-        "highly",
-        "absolutely",
-        "incredibly"
-    }
+    # Words repeated back-to-back ("angry angry angry") count once
+    tokens = []
+    for word in text.split():
+        if not tokens or tokens[-1] != word:
+            tokens.append(word)
 
-    positive_score = 0
-    negative_score = 0
+    # Steps 2 and 3: single words with negation and intensifier handling
+    for i, word in enumerate(tokens):
+        weight = WORD_WEIGHTS.get(word)
+        if weight is None:
+            continue
 
-    for i, word in enumerate(words):
+        if any(t in INTENSIFIERS for t in tokens[max(0, i - INTENSIFIER_WINDOW):i]):
+            weight *= 2
 
-        # Check whether the current word is positive
-        if word in positive_words:
+        if any(t in NEGATION_WORDS for t in tokens[max(0, i - NEGATION_WINDOW):i]):
+            weight = -weight
 
-            # Check previous word for negation
-            if i > 0 and words[i - 1] in negation_words:
-                negative_score += 1
+        score += weight
 
-            # Check previous word for intensifier
-            elif i > 0 and words[i - 1] in intensifiers:
-                positive_score += 2
+    # Step 4: classify
+    if score > 0:
+        return "Positive", score
+    if score < 0:
+        return "Negative", score
+    return "Neutral", score
 
-            else:
-                positive_score += 1
 
-        # Check whether the current word is negative
-        elif word in negative_words:
-
-            # Check previous word for negation
-            if i > 0 and words[i - 1] in negation_words:
-                positive_score += 1
-
-            # Check previous word for intensifier
-            elif i > 0 and words[i - 1] in intensifiers:
-                negative_score += 2
-
-            else:
-                negative_score += 1
-
-    # Calculate overall score
-    sentiment_score = positive_score - negative_score
-
-    # Classify sentiment
-    if sentiment_score > 0:
-        sentiment = "Positive"
-
-    elif sentiment_score < 0:
-        sentiment = "Negative"
-
-    else:
-        sentiment = "Neutral"
-
-    return sentiment, sentiment_score
 def analyze_file(
     input_file="data/scraped_reviews.csv",
     output_file="data/analyzed_reviews.csv"
 ):
     """
-    Load scraped data, check brand relevance,
+    Load scraped data, clean it, check brand relevance,
     perform sentiment analysis, and save results.
     """
 
-    data = pd.read_csv(input_file)
+    data = pd.read_csv(input_file, dtype={"id": str})
 
     if "text" not in data.columns:
         raise ValueError(
             "Input CSV must contain a 'text' column."
         )
 
-    # Check whether each mention is relevant to the brand
-    data["brand_relevant"] = data["text"].apply(
-        is_brand_relevant
-    )
+    # Step 5: cleaning / preprocessing
+    data, stats = clean_dataframe(data)
 
-    # Perform sentiment analysis
-    results = data["text"].apply(
-        analyze_sentiment
-    )
-
-    data["sentiment"] = results.apply(
-        lambda result: result[0]
-    )
-
-    data["score"] = results.apply(
-        lambda result: result[1]
-    )
-
-    data.to_csv(
-        output_file,
-        index=False
-    )
-
-    return data
-    """
-    Load scraped data, perform sentiment analysis,
-    and save the analyzed results.
-    """
-
-    # Load scraped data
-    data = pd.read_csv(input_file)
-
-    # Make sure the text column exists
-    if "text" not in data.columns:
-        raise ValueError(
-            "Input CSV must contain a 'text' column."
+    # Step 6: brand relevance
+    source = data["source"] if "source" in data.columns else None
+    data["brand_relevant"] = [
+        is_brand_relevant(text, src)
+        for text, src in zip(
+            data["text"],
+            source if source is not None else [None] * len(data)
         )
+    ]
 
-    # Apply sentiment analysis
-    results = data["text"].apply(analyze_sentiment)
+    # Step 7: rule-based sentiment on the cleaned text
+    results = data["clean_text"].apply(analyze_sentiment)
 
-    # Extract sentiment and score
-    data["sentiment"] = results.apply(
-        lambda result: result[0]
-    )
+    data["sentiment"] = results.apply(lambda result: result[0])
+    data["score"] = results.apply(lambda result: result[1])
 
-    data["score"] = results.apply(
-        lambda result: result[1]
-    )
-
-    # Save analyzed results
-    data.to_csv(
-        output_file,
-        index=False
-    )
+    data.to_csv(output_file, index=False)
 
     return data
 
@@ -200,19 +171,8 @@ if __name__ == "__main__":
 
     data = analyze_file()
 
-    print("\n" + "=" * 60)
-    print("ANALYZED BRAND MENTIONS")
-    print("=" * 60)
-
-    print(
-        data[
-            ["id", "text", "sentiment", "brand_relevant", "score"]
-        ]
-    )
-
-    print("\n" + "=" * 60)
     print("Analysis complete!")
-    print(
-        "Results saved to: data/analyzed_reviews.csv"
-    )
-    print("=" * 60)
+    print(f"Rows analysed:      {len(data)}")
+    print(f"Brand relevant:     {int(data['brand_relevant'].sum())}")
+    print(data["sentiment"].value_counts().to_string())
+    print("Results saved to: data/analyzed_reviews.csv")

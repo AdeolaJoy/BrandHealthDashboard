@@ -3,3 +3,10 @@ __pycache__/
 *.pyc
 .env
 .vscode/
+# Local tooling, not part of the project
+.agents/
+.claude/
+.codex/
+.impeccable/
+skills-lock.json
+PRODUCT.md
