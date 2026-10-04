@@ -2,6 +2,7 @@ import re
 import pandas as pd
 
 from brand_config import brand_config
+from brands import DEFAULT_BRAND, data_paths, get_brand
 from sentiment.cleaning import clean_dataframe
 
 
@@ -42,7 +43,7 @@ INTENSIFIER_WINDOW = 2  # an intensifier within 2 words before doubles it
 # Brand Relevance Check
 # -----------------------------
 
-def is_brand_relevant(text, source=None):
+def is_brand_relevant(text, source=None, keywords=None):
     """
     Check whether a mention is relevant to the selected brand.
 
@@ -56,7 +57,7 @@ def is_brand_relevant(text, source=None):
 
     text = str(text).lower()
 
-    for keyword in brand_config["brand_keywords"]:
+    for keyword in keywords or brand_config["brand_keywords"]:
         if keyword.lower() in text:
             return True
 
@@ -125,13 +126,19 @@ def analyze_sentiment(text):
 
 
 def analyze_file(
-    input_file="data/scraped_reviews.csv",
-    output_file="data/analyzed_reviews.csv"
+    input_file=None,
+    output_file=None,
+    brand=DEFAULT_BRAND,
 ):
     """
     Load scraped data, clean it, check brand relevance,
     perform sentiment analysis, and save results.
     """
+
+    raw_file, analyzed_file = data_paths(brand)
+    input_file = input_file or raw_file
+    output_file = output_file or analyzed_file
+    keywords = get_brand(brand)["keywords"]
 
     data = pd.read_csv(input_file, dtype={"id": str})
 
@@ -146,7 +153,7 @@ def analyze_file(
     # Step 6: brand relevance
     source = data["source"] if "source" in data.columns else None
     data["brand_relevant"] = [
-        is_brand_relevant(text, src)
+        is_brand_relevant(text, src, keywords)
         for text, src in zip(
             data["text"],
             source if source is not None else [None] * len(data)
@@ -169,10 +176,13 @@ def analyze_file(
 # -----------------------------
 if __name__ == "__main__":
 
-    data = analyze_file()
+    import sys
+
+    brand = sys.argv[1] if len(sys.argv) > 1 else DEFAULT_BRAND
+    data = analyze_file(brand=brand)
 
     print("Analysis complete!")
     print(f"Rows analysed:      {len(data)}")
     print(f"Brand relevant:     {int(data['brand_relevant'].sum())}")
     print(data["sentiment"].value_counts().to_string())
-    print("Results saved to: data/analyzed_reviews.csv")
+    print(f"Results saved to: {data_paths(brand)[1]}")

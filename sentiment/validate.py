@@ -30,7 +30,7 @@ import os
 
 import pandas as pd
 
-ANALYZED_FILE = "data/analyzed_reviews.csv"
+ANALYZED_FILE = "data/opay/analyzed_reviews.csv"
 SAMPLE_FILE = "data/labelled_sample.csv"
 LABELS = ["Positive", "Neutral", "Negative"]
 

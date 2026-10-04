@@ -9,7 +9,7 @@ import sys
 
 import pandas as pd
 
-INPUT_FILE = "data/scraped_reviews.csv"
+INPUT_FILE = "data/opay/scraped_reviews.csv"
 
 
 def inspect(input_file=INPUT_FILE):

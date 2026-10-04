@@ -4,7 +4,7 @@ from datetime import datetime
 import pandas as pd
 import streamlit as st
 
-from brand_config import brand_config
+from brands import BRANDS, DEFAULT_BRAND, INDUSTRIES, data_paths
 from metrics.brand_health import (
     daily_trend,
     load_analyzed,
@@ -18,12 +18,10 @@ from sentiment.sentiment_analyzer import analyze_file
 from ui import components as ui
 from ui.styles import CSS
 
-DATA_FILE = "data/analyzed_reviews.csv"
-BRAND = brand_config["brand_name"]
 PAGE = 20
 
 st.set_page_config(
-    page_title=f"{BRAND} Brand Health",
+    page_title="Brand Health",
     page_icon=":material/monitoring:",
     layout="wide",
     initial_sidebar_state="collapsed",
@@ -40,29 +38,58 @@ def load_data(path, modified):
     return load_analyzed(path)
 
 
-def refresh_data():
-    """Scrape, then analyse. Returns an error message or None."""
+def refresh_data(brand):
+    """Scrape, then analyse, one brand. Returns an error message or None."""
     try:
-        scrape_and_save()
-        analyze_file()
+        scrape_and_save(brand)
+        analyze_file(brand=brand)
     except Exception as error:  # network, parsing or file problems
         return f"{type(error).__name__}: {error}"
     return None
 
 
+FILTER_KEYS = ("f_ratings", "f_sentiments", "f_search", "f_sort", "shown")
+
+
 def reset_filters():
-    for key in ("f_dates", "f_ratings", "f_sentiments", "f_search"):
+    for key in FILTER_KEYS:
         st.session_state.pop(key, None)
+    st.session_state["date_reset"] = st.session_state.get("date_reset", 0) + 1
+
+
+def pick_industry():
+    """Industry changed: jump to its first brand and clear the old filters."""
+    st.session_state["brand"] = INDUSTRIES[st.session_state["industry"]][0]["name"]
+    reset_filters()
 
 
 # -----------------------------
-# Header + refresh
+# Header, brand picker + refresh
 # -----------------------------
+if st.session_state.get("brand") not in BRANDS:
+    wanted = st.query_params.get("brand", DEFAULT_BRAND)
+    st.session_state["brand"] = wanted if wanted in BRANDS else DEFAULT_BRAND
+if st.session_state.get("industry") not in INDUSTRIES:
+    st.session_state["industry"] = BRANDS[st.session_state["brand"]]["industry"]
+
+left, c_ind, c_brand, right = st.columns(
+    [3.2, 1.7, 1.7, 1.1], vertical_alignment="bottom"
+)
+with c_ind:
+    st.selectbox("Industry", list(INDUSTRIES), key="industry", on_change=pick_industry)
+with c_brand:
+    BRAND = st.selectbox(
+        "Brand", [b["name"] for b in INDUSTRIES[st.session_state["industry"]]],
+        key="brand", on_change=reset_filters,
+    )
+st.query_params["brand"] = BRAND
+brand_info = BRANDS[BRAND]
+
+raw_file, DATA_FILE = data_paths(BRAND)
 exists = os.path.exists(DATA_FILE)
 modified = os.path.getmtime(DATA_FILE) if exists else 0
 data = load_data(DATA_FILE, modified) if exists else pd.DataFrame()
 
-left, right = st.columns([5, 1], vertical_alignment="center")
 with left:
     if exists and not data.empty:
         source = data["source"].mode().iloc[0] if "source" in data else "Reviews"
@@ -78,12 +105,15 @@ with right:
         "Refresh data",
         type="primary",
         use_container_width=True,
-        help="Collect the newest public reviews and re-run the analysis.",
+        help=f"Collect the newest public reviews of {BRAND} and re-run the analysis.",
     )
 
+if brand_info["note"]:
+    st.caption(brand_info["note"])
+
 if refresh:
-    with st.status("Collecting reviews and running the analysis…") as status:
-        error = refresh_data()
+    with st.status(f"Collecting {BRAND} reviews and running the analysis…") as status:
+        error = refresh_data(BRAND)
         if error:
             status.update(label="Could not refresh. Showing the last saved data.",
                           state="error")
@@ -91,6 +121,7 @@ if refresh:
         else:
             status.update(label="Up to date", state="complete")
             load_data.clear()
+            reset_filters()  # new reviews: show the full, updated date range
             st.rerun()
 
 if data.empty:
@@ -109,9 +140,13 @@ first_day, last_day = data["date"].min().date(), data["date"].max().date()
 
 c1, c2, c3, c4 = st.columns([1.5, 1.5, 1.6, 1.4], vertical_alignment="top")
 with c1:
+    # The key includes the brand, the data's date range and a reset counter,
+    # so a new brand, newer reviews or "Reset filters" start from the full range
+    # instead of a range remembered from earlier.
     picked = st.date_input(
         "Dates", value=(first_day, last_day), min_value=first_day,
-        max_value=last_day, key="f_dates", format="DD/MM/YYYY",
+        max_value=last_day, format="DD/MM/YYYY",
+        key=f"f_dates_{BRAND}_{first_day}_{last_day}_{st.session_state.get('date_reset', 0)}",
     )
 with c2:
     ratings = st.pills(

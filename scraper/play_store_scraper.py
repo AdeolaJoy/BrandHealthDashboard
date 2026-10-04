@@ -12,9 +12,9 @@ import os
 import pandas as pd
 from google_play_scraper import Sort, reviews
 
-from brand_config import brand_config
+from brands import DEFAULT_BRAND, data_paths, get_brand
 
-OUTPUT_FILE = "data/scraped_reviews.csv"
+OUTPUT_FILE = data_paths(DEFAULT_BRAND)[0]
 
 # Standard raw-data schema shared by every scraper
 COLUMNS = [
@@ -35,7 +35,7 @@ def fetch_reviews(app_id, count, lang, country):
     return results
 
 
-def to_records(raw_reviews, app_id, lang, country):
+def to_records(raw_reviews, app_id, lang, country, brand_name):
     """Convert library output into the standard schema."""
     url = (
         f"https://play.google.com/store/apps/details"
@@ -44,7 +44,7 @@ def to_records(raw_reviews, app_id, lang, country):
     return [
         {
             "id": r["reviewId"],
-            "brand": brand_config["brand_name"],
+            "brand": brand_name,
             "text": r["content"],
             "rating": r["score"],
             "date": r["at"].strftime("%Y-%m-%d"),
@@ -73,26 +73,31 @@ def save_records(records, output_file=OUTPUT_FILE):
 
 
 def scrape_and_save(
-    app_id=None,
+    brand=DEFAULT_BRAND,
     count=None,
-    output_file=OUTPUT_FILE,
+    output_file=None,
+    app_id=None,
 ):
-    cfg = brand_config["play_store"]
+    """Scrape one brand's Google Play reviews into its own raw-data file."""
+    cfg = get_brand(brand)
     app_id = app_id or cfg["app_id"]
     count = count or cfg["review_count"]
+    output_file = output_file or data_paths(brand)[0]
 
     raw = fetch_reviews(app_id, count, cfg["lang"], cfg["country"])
-    records = to_records(raw, app_id, cfg["lang"], cfg["country"])
+    records = to_records(raw, app_id, cfg["lang"], cfg["country"], cfg["name"])
     total = save_records(records, output_file)
     return len(records), total
 
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--app-id", help="Google Play app id")
+    parser.add_argument("--brand", default=DEFAULT_BRAND, help="brand name from brands.py")
+    parser.add_argument("--app-id", help="Google Play app id (overrides the brand's)")
     parser.add_argument("--count", type=int, help="reviews to fetch")
-    parser.add_argument("--out", default=OUTPUT_FILE)
+    parser.add_argument("--out", help="output CSV (default: the brand's data folder)")
     args = parser.parse_args()
 
-    fetched, total = scrape_and_save(args.app_id, args.count, args.out)
-    print(f"Fetched {fetched} reviews; {total} stored in {args.out}")
+    fetched, total = scrape_and_save(args.brand, args.count, args.out, args.app_id)
+    print(f"Fetched {fetched} reviews; {total} stored in "
+          f"{args.out or data_paths(args.brand)[0]}")

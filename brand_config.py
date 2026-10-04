@@ -11,17 +11,24 @@
 # complaints and praise plus the DEVELOPMENT half of the reviews only;
 # the TEST half is used to check the result (see sentiment/validate.py).
 
-brand_config = {
-    "brand_name": "OPay",
+from brands import get_brand, DEFAULT_BRAND
 
-    "industry": "Fintech / Mobile Payments",
+# The vocabulary below is shared by every brand. brand_name, industry,
+# play_store and brand_keywords are the DEFAULT brand's; the dashboard and
+# pipeline pass the selected brand explicitly (see brands.py).
+_default = get_brand(DEFAULT_BRAND)
+
+brand_config = {
+    "brand_name": _default["name"],
+
+    "industry": _default["industry"],
 
     # Google Play source settings (the brand's app)
     "play_store": {
-        "app_id": "team.opay.pay",
-        "country": "ng",
-        "lang": "en",
-        "review_count": 5000
+        "app_id": _default["app_id"],
+        "country": _default["country"],
+        "lang": _default["lang"],
+        "review_count": _default["review_count"],
     },
 
     # Sources where every item is about the brand itself, so the keyword
@@ -29,27 +36,7 @@ brand_config = {
     "brand_specific_sources": ["Google Play"],
 
     # Terms used to identify mentions related to the brand
-    "brand_keywords": [
-        "opay",
-        "o-pay",
-        "opay app",
-        "opay wallet",
-        "opay pos"
-    ],
-
-    # Industry-related terms
-    "industry_keywords": [
-        "transfer",
-        "wallet",
-        "payment",
-        "transaction",
-        "airtime",
-        "bills",
-        "loan",
-        "pos",
-        "customer service",
-        "app"
-    ],
+    "brand_keywords": _default["keywords"],
 
     # ---------------- Positive vocabulary ----------------
     "positive_words": [
@@ -62,7 +49,10 @@ brand_config = {
         "thanks", "thank", "recommend", "recommended", "kudos", "congrats",
         "congratulations", "impressive", "impressed", "enjoy", "enjoying",
         "enjoyed", "appreciate", "appreciated", "worth", "wow", "sweet",
-        "valid", "hasslefree", "magnificent"
+        "valid", "hasslefree", "magnificent",
+        # food, travel and delivery
+        "delicious", "tasty", "yummy", "fresh", "comfortable", "courteous",
+        "punctual", "polite", "cheap", "cheaper", "tidy", "crispy"
     ],
 
     "strong_positive_words": [
@@ -99,7 +89,10 @@ brand_config = {
         "ignore", "ignored", "ignoring", "unprofessional", "cancelled",
         "cancelling", "canceled", "canceling", "unserious", "inconvenient",
         "compromised", "hacked", "unsafe", "insecure", "complicated",
-        "confusing", "tedious"
+        "confusing", "tedious",
+        # food, travel and delivery
+        "stale", "cold", "late", "dirty", "overcrowded", "expired", "burnt",
+        "undercooked", "tasteless", "overbooked", "rescheduled"
     ],
 
     "strong_negative_words": [

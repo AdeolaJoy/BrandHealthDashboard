@@ -3,7 +3,7 @@ import re
 import pandas as pd
 
 
-def load_analyzed(input_file="data/analyzed_reviews.csv"):
+def load_analyzed(input_file="data/opay/analyzed_reviews.csv"):
     """Load analyzed reviews, keeping only brand-relevant mentions."""
     data = pd.read_csv(input_file, dtype={"id": str}, parse_dates=["date"])
 
@@ -13,7 +13,7 @@ def load_analyzed(input_file="data/analyzed_reviews.csv"):
     return data.reset_index(drop=True)
 
 
-def calculate_brand_health(input_file="data/analyzed_reviews.csv"):
+def calculate_brand_health(input_file="data/opay/analyzed_reviews.csv"):
     return summarize(load_analyzed(input_file))
 
 
